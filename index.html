@@ -9,7 +9,8 @@
   <script>
     // This lightweight loader fetches the existing text file that contains the full
     // HTML (SPP RETRORUSH DRIVE_index.txt), strips the line-number prefixes added
-    // by the repository file view, and replaces this document with the cleaned HTML.
+    // by the repository file view, injects the multiplayer client script tag, and
+    // replaces this document with the cleaned HTML.
     (function(){
       const src = 'SPP%20RETRORUSH%20DRIVE_index.txt';
       fetch(src).then(r=>{
@@ -17,7 +18,10 @@
         return r.text();
       }).then(t=>{
         const cleaned = t.split('\n').map(l=>l.replace(/^\s*\d+\|\s?/, '')).join('\n');
-        document.open(); document.write(cleaned); document.close();
+        // inject multiplayer client script right before </body>
+        const injectScript = '<script src="multiplayer.js"></' + 'script>';
+        const cleanedWithScript = cleaned.replace(/<\/body>/i, injectScript + '\n</body>');
+        document.open(); document.write(cleanedWithScript); document.close();
       }).catch(e=>{
         document.body.innerHTML = '<h2>Failed to load site content</h2><pre>'+e.toString()+'</pre>';
       });
