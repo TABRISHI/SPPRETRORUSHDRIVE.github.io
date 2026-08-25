@@ -1,0 +1,477 @@
+﻿// server.js
+// Single-file Node server: serves static site, Socket.IO rooms + realtime relay,
+// persists leaderboard + rooms to SQLite (better-sqlite3).
+//
+// Usage:
+//   npm init -y
+//   npm install express socket.io better-sqlite3
+//   node server.js
+//
+// In production set PORT and ORIGIN (CORS) environment variables.
+
+
+const express = require('express');
+const http = require('http');
+const path = require('path');
+const Database = require('better-sqlite3');
+const { Server } = require('socket.io');
+
+
+const PORT = process.env.PORT || 3000;
+const ORIGIN = process.env.ORIGIN || '*'; // replace with your site in production
+
+
+const app = express();
+const server = http.createServer(app);
+
+
+const io = new Server(server, {
+  cors: { origin: ORIGIN, methods: ["GET","POST"] }
+});
+
+
+// Serve static files from current directory (so index.html + multiplayer.js are accessible)
+app.use(express.static(path.join(__dirname)));
+
+
+const db = new Database(path.join(__dirname, 'data.db'));
+
+
+// Initialize tables
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS leaderboard (
+    username TEXT PRIMARY KEY,
+    wins INTEGER DEFAULT 0,
+    races INTEGER DEFAULT 0,
+    best_time REAL DEFAULT NULL
+  )
+`).run();
+
+
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS rooms (
+    code TEXT PRIMARY KEY,
+    host_id TEXT,
+    host_name TEXT,
+    members_json TEXT,
+    created_at INTEGER
+  )
+`).run();
+
+
+// In-memory rooms for realtime actions
+const rooms = {}; // code -> { hostId, members: { socketId: {name} }, createdAt }
+
+
+function makeCode(len=6){
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for(let i=0;i<len;i++) out += chars[Math.floor(Math.random()*chars.length)];
+  return out;
+}
+
+
+function persistRoom(code){
+  const r = rooms[code];
+  if(!r) {
+    db.prepare('DELETE FROM rooms WHERE code = ?').run(code);
+    return;
+  }
+  const membersJson = JSON.stringify(Object.entries(r.members).map(([id, m]) => ({ id, name: m.name })));
+  db.prepare(`
+    INSERT OR REPLACE INTO rooms (code, host_id, host_name, members_json, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(code, r.hostId, r.members[r.hostId]?.name || null, membersJson, r.createdAt || Date.now());
+}
+
+
+function getRoomView(code){
+  const r = rooms[code];
+  if(!r) return null;
+  return {
+    code,
+    hostId: r.hostId,
+    members: Object.entries(r.members).map(([id, m]) => ({ id, name: m.name }))
+  };
+}
+
+
+// Leaderboard helpers
+const upsertLeaderboard = db.prepare(`
+  INSERT INTO leaderboard (username, wins, races, best_time)
+  VALUES (?, ?, ?, ?)
+  ON CONFLICT(username) DO UPDATE SET
+    wins = excluded.wins,
+    races = excluded.races,
+    best_time = excluded.best_time
+`);
+const getLeaderboardTop = db.prepare(`
+  SELECT username, wins, races, best_time
+  FROM leaderboard
+  ORDER BY wins DESC, COALESCE(best_time, 999999) ASC
+  LIMIT ?
+`);
+
+
+io.on('connection', socket => {
+  console.log('socket connected', socket.id);
+
+
+  socket.on('create_room', ({ name }, cb) => {
+    const code = makeCode();
+    rooms[code] = { hostId: socket.id, members: {}, createdAt: Date.now() };
+    rooms[code].members[socket.id] = { name: name || 'GUEST' };
+    socket.join(code);
+    persistRoom(code);
+    cb && cb({ ok: true, code });
+    io.to(code).emit('room_update', getRoomView(code));
+    console.log('room created', code);
+  });
+
+
+  socket.on('join_room', ({ code, name }, cb) => {
+    const r = rooms[code];
+    if(!r) return cb && cb({ ok: false, error: 'Room not found' });
+    if(Object.keys(r.members).length >= 16) return cb && cb({ ok: false, error: 'Room full' });
+    r.members[socket.id] = { name: name || 'GUEST' };
+    socket.join(code);
+    persistRoom(code);
+    cb && cb({ ok: true, code, host: r.hostId === socket.id });
+    io.to(code).emit('room_update', getRoomView(code));
+    console.log(`${name || 'GUEST'} joined ${code}`);
+  });
+
+
+  socket.on('leave_room', ({ code }) => {
+    leaveRoom(socket, code);
+  });
+
+
+  socket.on('start_race', ({ code }) => {
+    const r = rooms[code];
+    if(!r) return;
+    if(r.hostId !== socket.id) return;
+    io.to(code).emit('race_start', { at: Date.now() });
+    console.log('race_start', code);
+  });
+
+
+  // Relay periodic player state: { code, x,y,z, rotY, speed, timestamp }
+  socket.on('player_state', (data) => {
+    const { code } = data;
+    if(!code) return;
+    socket.to(code).emit('player_state_update', { id: socket.id, ...data });
+  });
+
+
+  // Clients send results at race end; server persists to leaderboard
+  socket.on('race_end', ({ code, results }) => {
+    if(!Array.isArray(results)) return;
+    results.forEach(r => {
+      const existing = db.prepare('SELECT * FROM leaderboard WHERE username = ?').get(r.name);
+      const wins = (existing?.wins || 0) + (r.place === 1 ? 1 : 0);
+      const races = (existing?.races || 0) + 1;
+      const best_time = existing && existing.best_time ? Math.min(existing.best_time, r.time) : r.time;
+      upsertLeaderboard.run(r.name, wins, races, best_time);
+    });
+    const top = getLeaderboardTop.all(100);
+    io.emit('leaderboard_update', top);
+    console.log('race_end persisted for room', code);
+  });
+
+
+  socket.on('disconnect', () => {
+    // Remove socket from any rooms
+    for(const code of Object.keys(rooms)){
+      if(rooms[code].members[socket.id]){
+        leaveRoom(socket, code);
+      }
+    }
+    console.log('socket disconnected', socket.id);
+  });
+
+
+  function leaveRoom(socket, code){
+    const r = rooms[code];
+    if(!r) return;
+    delete r.members[socket.id];
+    socket.leave(code);
+    if(r.hostId === socket.id){
+      const ids = Object.keys(r.members);
+      if(ids.length > 0){
+        r.hostId = ids[0];
+      } else {
+        delete rooms[code];
+        persistRoom(code);
+        io.emit('room_removed', { code });
+        console.log('room removed', code);
+        return;
+      }
+    }
+    persistRoom(code);
+    io.to(code).emit('room_update', getRoomView(code));
+    console.log('left', socket.id, code);
+  }
+});
+
+
+// HTTP endpoint to fetch leaderboard
+app.get('/leaderboard', (req, res) => {
+  const top = db.prepare('SELECT username, wins, races, best_time FROM leaderboard ORDER BY wins DESC, COALESCE(best_time, 999999) ASC LIMIT 100').all();
+  res.json(top);
+});
+
+
+server.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+  console.log(`Serving static files from ${__dirname}`);
+});
+
+
+
+
+// server.js
+// Single-file Node server: serves static site, Socket.IO rooms + realtime relay,
+// persists leaderboard + rooms to SQLite (better-sqlite3).
+//
+// Usage:
+//   npm init -y
+//   npm install express socket.io better-sqlite3
+//   node server.js
+//
+// In production set PORT and ORIGIN (CORS) environment variables.
+
+
+const express = require('express');
+const http = require('http');
+const path = require('path');
+const Database = require('better-sqlite3');
+const { Server } = require('socket.io');
+
+
+const PORT = process.env.PORT || 3000;
+const ORIGIN = process.env.ORIGIN || '*'; // replace with your site in production
+
+
+const app = express();
+const server = http.createServer(app);
+
+
+const io = new Server(server, {
+  cors: { origin: ORIGIN, methods: ["GET","POST"] }
+});
+
+
+// Serve static files from current directory (so index.html + multiplayer.js are accessible)
+app.use(express.static(path.join(__dirname)));
+
+
+const db = new Database(path.join(__dirname, 'data.db'));
+
+
+// Initialize tables
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS leaderboard (
+    username TEXT PRIMARY KEY,
+    wins INTEGER DEFAULT 0,
+    races INTEGER DEFAULT 0,
+    best_time REAL DEFAULT NULL
+  )
+`).run();
+
+
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS rooms (
+    code TEXT PRIMARY KEY,
+    host_id TEXT,
+    host_name TEXT,
+    members_json TEXT,
+    created_at INTEGER
+  )
+`).run();
+
+
+// In-memory rooms for realtime actions
+const rooms = {}; // code -> { hostId, members: { socketId: {name} }, createdAt }
+
+
+function makeCode(len=6){
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for(let i=0;i<len;i++) out += chars[Math.floor(Math.random()*chars.length)];
+  return out;
+}
+
+
+function persistRoom(code){
+  const r = rooms[code];
+  if(!r) {
+    db.prepare('DELETE FROM rooms WHERE code = ?').run(code);
+    return;
+  }
+  const membersJson = JSON.stringify(Object.entries(r.members).map(([id, m]) => ({ id, name: m.name })));
+  db.prepare(`
+    INSERT OR REPLACE INTO rooms (code, host_id, host_name, members_json, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(code, r.hostId, r.members[r.hostId]?.name || null, membersJson, r.createdAt || Date.now());
+}
+
+
+function getRoomView(code){
+  const r = rooms[code];
+  if(!r) return null;
+  return {
+    code,
+    hostId: r.hostId,
+    members: Object.entries(r.members).map(([id, m]) => ({ id, name: m.name }))
+  };
+}
+
+
+// Leaderboard helpers
+const upsertLeaderboard = db.prepare(`
+  INSERT INTO leaderboard (username, wins, races, best_time)
+  VALUES (?, ?, ?, ?)
+  ON CONFLICT(username) DO UPDATE SET
+    wins = excluded.wins,
+    races = excluded.races,
+    best_time = excluded.best_time
+`);
+const getLeaderboardTop = db.prepare(`
+  SELECT username, wins, races, best_time
+  FROM leaderboard
+  ORDER BY wins DESC, COALESCE(best_time, 999999) ASC
+  LIMIT ?
+`);
+
+
+io.on('connection', socket => {
+  console.log('socket connected', socket.id);
+
+
+  socket.on('create_room', ({ name }, cb) => {
+    const code = makeCode();
+    rooms[code] = { hostId: socket.id, members: {}, createdAt: Date.now() };
+    rooms[code].members[socket.id] = { name: name || 'GUEST' };
+    socket.join(code);
+    persistRoom(code);
+    cb && cb({ ok: true, code });
+    io.to(code).emit('room_update', getRoomView(code));
+    console.log('room created', code);
+  });
+
+
+  socket.on('join_room', ({ code, name }, cb) => {
+    const r = rooms[code];
+    if(!r) return cb && cb({ ok: false, error: 'Room not found' });
+    if(Object.keys(r.members).length >= 16) return cb && cb({ ok: false, error: 'Room full' });
+    r.members[socket.id] = { name: name || 'GUEST' };
+    socket.join(code);
+    persistRoom(code);
+    cb && cb({ ok: true, code, host: r.hostId === socket.id });
+    io.to(code).emit('room_update', getRoomView(code));
+    console.log(`${name || 'GUEST'} joined ${code}`);
+  });
+
+
+  socket.on('leave_room', ({ code }) => {
+    leaveRoom(socket, code);
+  });
+
+
+  socket.on('start_race', ({ code }) => {
+    const r = rooms[code];
+    if(!r) return;
+    if(r.hostId !== socket.id) return;
+    io.to(code).emit('race_start', { at: Date.now() });
+    console.log('race_start', code);
+  });
+
+
+  // Relay periodic player state: { code, x,y,z, rotY, speed, timestamp }
+  socket.on('player_state', (data) => {
+    const { code } = data;
+    if(!code) return;
+    socket.to(code).emit('player_state_update', { id: socket.id, ...data });
+  });
+
+
+  // Clients send results at race end; server persists to leaderboard
+  socket.on('race_end', ({ code, results }) => {
+    if(!Array.isArray(results)) return;
+    results.forEach(r => {
+      const existing = db.prepare('SELECT * FROM leaderboard WHERE username = ?').get(r.name);
+      const wins = (existing?.wins || 0) + (r.place === 1 ? 1 : 0);
+      const races = (existing?.races || 0) + 1;
+      const best_time = existing && existing.best_time ? Math.min(existing.best_time, r.time) : r.time;
+      upsertLeaderboard.run(r.name, wins, races, best_time);
+    });
+    const top = getLeaderboardTop.all(100);
+    io.emit('leaderboard_update', top);
+    console.log('race_end persisted for room', code);
+  });
+
+
+  socket.on('disconnect', () => {
+    // Remove socket from any rooms
+    for(const code of Object.keys(rooms)){
+      if(rooms[code].members[socket.id]){
+        leaveRoom(socket, code);
+      }
+    }
+    console.log('socket disconnected', socket.id);
+  });
+
+
+  function leaveRoom(socket, code){
+    const r = rooms[code];
+    if(!r) return;
+    delete r.members[socket.id];
+    socket.leave(code);
+    if(r.hostId === socket.id){
+      const ids = Object.keys(r.members);
+      if(ids.length > 0){
+        r.hostId = ids[0];
+      } else {
+        delete rooms[code];
+        persistRoom(code);
+        io.emit('room_removed', { code });
+        console.log('room removed', code);
+        return;
+      }
+    }
+    persistRoom(code);
+    io.to(code).emit('room_update', getRoomView(code));
+    console.log('left', socket.id, code);
+  }
+});
+
+
+// HTTP endpoint to fetch leaderboard
+app.get('/leaderboard', (req, res) => {
+  const top = db.prepare('SELECT username, wins, races, best_time FROM leaderboard ORDER BY wins DESC, COALESCE(best_time, 999999) ASC LIMIT 100').all();
+  res.json(top);
+});
+
+
+server.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+  console.log(`Serving static files from ${__dirname}`);
+});
+
+
+
+
+{
+  "name": "spp-retrorush-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^8.4.0",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  }
+}
