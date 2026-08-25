@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SPP RETRORUSH DRIVE - loader</title>
+</head>
+<body>
+  <script>
+    // This lightweight loader fetches the existing text file that contains the full
+    // HTML (SPP RETRORUSH DRIVE_index.txt), strips the line-number prefixes added
+    // by the repository file view, and replaces this document with the cleaned HTML.
+    (function(){
+      const src = 'SPP%20RETRORUSH%20DRIVE_index.txt';
+      fetch(src).then(r=>{
+        if(!r.ok) throw new Error('fetch failed: '+r.status);
+        return r.text();
+      }).then(t=>{
+        const cleaned = t.split('\n').map(l=>l.replace(/^\s*\d+\|\s?/, '')).join('\n');
+        document.open(); document.write(cleaned); document.close();
+      }).catch(e=>{
+        document.body.innerHTML = '<h2>Failed to load site content</h2><pre>'+e.toString()+'</pre>';
+      });
+    })();
+  </script>
+</body>
+</html>
