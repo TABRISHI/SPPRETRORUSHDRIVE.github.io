@@ -6,6 +6,7 @@
   <title>SPP RETRORUSH DRIVE - loader</title>
 </head>
 <body>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
     // This lightweight loader fetches the existing text file that contains the full
     // HTML (SPP RETRORUSH DRIVE_index.txt), strips the line-number prefixes added
@@ -18,9 +19,10 @@
         return r.text();
       }).then(t=>{
         const cleaned = t.split('\n').map(l=>l.replace(/^\s*\d+\|\s?/, '')).join('\n');
-        // inject multiplayer client script right before </body>
-        const injectScript = '<script src="multiplayer.js"></' + 'script>';
-        const cleanedWithScript = cleaned.replace(/<\/body>/i, injectScript + '\n</body>');
+        // inject multiplayer client scripts right before </body>
+        const scripts = '<script src="multiplayer.js"></' + 'script>\n' +
+                       '<script src="multiplayer-integration.js"></' + 'script>';
+        const cleanedWithScript = cleaned.replace(/<\/body>/i, scripts + '\n</body>');
         document.open(); document.write(cleanedWithScript); document.close();
       }).catch(e=>{
         document.body.innerHTML = '<h2>Failed to load site content</h2><pre>'+e.toString()+'</pre>';
