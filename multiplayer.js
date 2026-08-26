@@ -2,18 +2,26 @@
 // Connects to the backend server via Socket.IO
 
 // ===== CONFIGURATION =====
-// Change this to your deployed Render URL
+// Auto-detect environment: use localhost for development, Render URL for production
 const SERVER_URL = window.location.hostname === 'localhost' 
   ? 'http://localhost:3000'
-  : 'https://spp-retrorush-drive.onrender.com'; // Replace with your actual Render URL
+  : 'https://spp-retrorush-drive.onrender.com'; // Render deployment URL
+
+console.log('[Multiplayer] Connecting to server:', SERVER_URL);
 
 // ===== SOCKET.IO CONNECTION =====
-const socket = io(SERVER_URL, {
-  reconnection: true,
-  reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
-  reconnectionAttempts: 5
-});
+let socket;
+try {
+  socket = io(SERVER_URL, {
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    reconnectionAttempts: 5,
+    transports: ['websocket', 'polling']
+  });
+} catch(e) {
+  console.error('[Multiplayer] Failed to initialize Socket.IO:', e);
+}
 
 // ===== STATE =====
 let playerName = 'GUEST';
@@ -23,12 +31,12 @@ let players = {};
 
 // ===== CONNECTION EVENTS =====
 socket.on('connect', () => {
-  console.log('[Multiplayer] Connected to server:', socket.id);
+  console.log('[Multiplayer] ✅ Connected to server:', socket.id);
   displayMessage('Connected to multiplayer server!', 'success');
 });
 
 socket.on('disconnect', () => {
-  console.log('[Multiplayer] Disconnected from server');
+  console.log('[Multiplayer] ❌ Disconnected from server');
   displayMessage('Disconnected from server', 'error');
   currentRoom = null;
   players = {};
