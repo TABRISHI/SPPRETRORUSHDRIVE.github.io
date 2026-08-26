@@ -21,6 +21,7 @@
         const cleaned = t.split('\n').map(l=>l.replace(/^\s*\d+\|\s?/, '')).join('\n');
         // inject multiplayer client scripts right before </body>
         const scripts = '<script src="multiplayer.js"></' + 'script>\n' +
+                       '<script src="party-integration.js"></' + 'script>\n' +
                        '<script src="multiplayer-integration.js"></' + 'script>';
         const cleanedWithScript = cleaned.replace(/<\/body>/i, scripts + '\n</body>');
         document.open(); document.write(cleanedWithScript); document.close();
