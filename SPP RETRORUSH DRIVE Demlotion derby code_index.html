@@ -1,601 +1,1755 @@
-﻿// DEMOLITION DERBY - Standalone Three.js Game
-// Controls: WASD / Arrow Keys
-// Last car alive wins!
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>Demolition Derby</title>
 
+<style>
+*{
+  box-sizing:border-box;
+  user-select:none;
+}
+
+html,body{
+  margin:0;
+  width:100%;
+  height:100%;
+  overflow:hidden;
+  background:#111;
+  font-family:Arial,Helvetica,sans-serif;
+}
+
+canvas{
+  display:block;
+}
+
+#hud{
+  position:fixed;
+  top:15px;
+  left:15px;
+  z-index:10;
+  color:white;
+  background:rgba(0,0,0,.75);
+  border:2px solid #ff9800;
+  padding:15px;
+  min-width:210px;
+  font-weight:bold;
+}
+
+#title{
+  color:#ff9800;
+  font-size:20px;
+  margin-bottom:10px;
+}
+
+.bar{
+  width:180px;
+  height:15px;
+  background:#333;
+  margin-top:5px;
+  border:1px solid #777;
+}
+
+#healthBar{
+  width:100%;
+  height:100%;
+  background:#35d46b;
+}
+
+#menu{
+  position:fixed;
+  inset:0;
+  z-index:20;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(0,0,0,.75);
+}
+
+#menuBox{
+  text-align:center;
+  color:white;
+  background:#181818;
+  border:2px solid #ff9800;
+  padding:35px;
+  width:min(90%,450px);
+}
+
+#menuBox h1{
+  color:#ff9800;
+  font-size:35px;
+  margin:0 0 10px;
+}
+
+#menuBox p{
+  color:#ccc;
+  line-height:1.6;
+}
+
+button{
+  border:0;
+  background:#ff9800;
+  color:#111;
+  padding:14px 25px;
+  font-size:16px;
+  font-weight:bold;
+  cursor:pointer;
+  margin-top:15px;
+}
+
+button:hover{
+  background:#ffb52e;
+}
+
+#result{
+  display:none;
+  position:fixed;
+  inset:0;
+  z-index:30;
+  align-items:center;
+  justify-content:center;
+  background:rgba(0,0,0,.72);
+  text-align:center;
+  color:white;
+}
+
+#resultBox{
+  background:#181818;
+  border:2px solid #ff9800;
+  padding:35px;
+}
+
+#resultTitle{
+  color:#ff9800;
+  font-size:35px;
+}
+
+#mobile{
+  position:fixed;
+  bottom:20px;
+  left:0;
+  right:0;
+  z-index:15;
+  display:none;
+  justify-content:space-between;
+  padding:0 20px;
+  pointer-events:none;
+}
+
+.mobileGroup{
+  display:grid;
+  grid-template-columns:65px 65px 65px;
+  gap:5px;
+  pointer-events:auto;
+}
+
+.mobileGroup button{
+  width:65px;
+  height:65px;
+  margin:0;
+  padding:0;
+  border-radius:10px;
+  opacity:.75;
+}
+
+#gasControls{
+  display:flex;
+  gap:10px;
+  pointer-events:auto;
+}
+
+#gasControls button{
+  width:75px;
+  height:75px;
+  margin:0;
+  padding:0;
+  border-radius:50%;
+}
+
+@media(max-width:700px){
+  #mobile{
+    display:flex;
+  }
+
+  #hud{
+    transform:scale(.8);
+    transform-origin:top left;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div id="hud">
+  <div id="title">DEMOLITION DERBY</div>
+
+  YOUR HP:
+  <span id="hp">100</span>
+
+  <div class="bar">
+    <div id="healthBar"></div>
+  </div>
+
+  <br>
+
+  CARS LEFT:
+  <span id="carsLeft">8</span>
+
+  <br><br>
+
+  KILLS:
+  <span id="kills">0</span>
+
+  <br><br>
+
+  SPEED:
+  <span id="speed">0</span>
+</div>
+
+<div id="menu">
+  <div id="menuBox">
+    <h1>DEMOLITION DERBY</h1>
+
+    <p>
+      Crash into the other cars.<br>
+      Destroy them before they destroy you.<br>
+      Last car standing wins!
+    </p>
+
+    <p>
+      <b>WASD</b> or <b>ARROW KEYS</b> to drive
+    </p>
+
+    <button id="startButton">START DERBY</button>
+  </div>
+</div>
+
+<div id="result">
+  <div id="resultBox">
+    <div id="resultTitle">YOU WIN!</div>
+
+    <p id="resultText"></p>
+
+    <button id="restartButton">PLAY AGAIN</button>
+  </div>
+</div>
+
+<div id="mobile">
+
+  <div class="mobileGroup">
+    <span></span>
+    <button data-control="up">▲</button>
+    <span></span>
+
+    <button data-control="left">◀</button>
+    <button data-control="down">▼</button>
+    <button data-control="right">▶</button>
+  </div>
+
+  <div id="gasControls">
+    <button data-control="gas">GAS</button>
+    <button data-control="reverse">REV</button>
+  </div>
+
+</div>
+
+<!-- Three.js -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+<script>
+
+/* =========================================================
+   DEMOLITION DERBY
+   Standalone GitHub Pages game
+========================================================= */
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x151515);
 
+scene.background = new THREE.Color(0x111111);
+
+scene.fog = new THREE.Fog(
+  0x111111,
+  130,
+  300
+);
+
+
+/* =========================================================
+   CAMERA
+========================================================= */
 
 const camera = new THREE.PerspectiveCamera(
   65,
-  innerWidth / innerHeight,
+  window.innerWidth / window.innerHeight,
   0.1,
   500
 );
 
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(innerWidth, innerHeight);
-document.body.appendChild(renderer.domElement);
-
-
-// ---------------- LIGHTING ----------------
-
-
-scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 2));
-
-
-const light = new THREE.DirectionalLight(0xffffff, 2);
-light.position.set(50, 100, 50);
-scene.add(light);
-
-
-// ---------------- ARENA ----------------
-
-
-const arenaSize = 100;
-
-
-const floor = new THREE.Mesh(
-  new THREE.CylinderGeometry(arenaSize, arenaSize, 1, 64),
-  new THREE.MeshStandardMaterial({ color: 0x444444 })
+camera.position.set(
+  0,
+  35,
+  50
 );
 
 
+/* =========================================================
+   RENDERER
+========================================================= */
+
+const renderer =
+  new THREE.WebGLRenderer({
+    antialias:true
+  });
+
+renderer.setSize(
+  window.innerWidth,
+  window.innerHeight
+);
+
+renderer.setPixelRatio(
+  Math.min(window.devicePixelRatio,2)
+);
+
+renderer.shadowMap.enabled = true;
+
+document.body.appendChild(
+  renderer.domElement
+);
+
+
+/* =========================================================
+   LIGHTS
+========================================================= */
+
+const ambient =
+  new THREE.HemisphereLight(
+    0xffffff,
+    0x333333,
+    2
+  );
+
+scene.add(ambient);
+
+
+const sunlight =
+  new THREE.DirectionalLight(
+    0xffffff,
+    2
+  );
+
+sunlight.position.set(
+  50,
+  100,
+  50
+);
+
+sunlight.castShadow = true;
+
+scene.add(sunlight);
+
+
+/* =========================================================
+   ARENA
+========================================================= */
+
+const ARENA_RADIUS = 90;
+
+
+/* Floor */
+
+const floor =
+  new THREE.Mesh(
+    new THREE.CylinderGeometry(
+      ARENA_RADIUS,
+      ARENA_RADIUS,
+      1,
+      64
+    ),
+
+    new THREE.MeshStandardMaterial({
+      color:0x444444,
+      roughness:1
+    })
+  );
+
 floor.position.y = -0.5;
+
+floor.receiveShadow = true;
+
 scene.add(floor);
 
 
-// Arena wall
-const wall = new THREE.Mesh(
-  new THREE.TorusGeometry(arenaSize, 2, 8, 64),
-  new THREE.MeshStandardMaterial({ color: 0xff8800 })
-);
+/* Arena rings */
+
+for(const radius of [30,60]){
+
+  const ring =
+    new THREE.Mesh(
+      new THREE.RingGeometry(
+        radius - 0.15,
+        radius + 0.15,
+        64
+      ),
+
+      new THREE.MeshBasicMaterial({
+        color:0x777777,
+        side:THREE.DoubleSide
+      })
+    );
+
+  ring.rotation.x =
+    -Math.PI / 2;
+
+  ring.position.y = 0.02;
+
+  scene.add(ring);
+}
 
 
-wall.rotation.x = Math.PI / 2;
+/* Arena wall */
+
+const wall =
+  new THREE.Mesh(
+    new THREE.TorusGeometry(
+      ARENA_RADIUS,
+      2,
+      10,
+      64
+    ),
+
+    new THREE.MeshStandardMaterial({
+      color:0xff9800,
+      metalness:.6,
+      roughness:.3
+    })
+  );
+
+wall.rotation.x =
+  Math.PI / 2;
+
+wall.position.y = 1.5;
+
 scene.add(wall);
 
 
-// ---------------- CAR CREATION ----------------
-
+/* =========================================================
+   CARS
+========================================================= */
 
 const cars = [];
 
+const carColors = [
+  0x2196ff,
+  0xff3333,
+  0x33dd66,
+  0xffdd22,
+  0xdd33dd,
+  0xff7733,
+  0xffffff,
+  0x22cccc
+];
 
-function createCar(color, name, isPlayer = false) {
+
+function createCar(
+  color,
+  name,
+  isPlayer=false
+){
+
+  const group =
+    new THREE.Group();
 
 
-  const group = new THREE.Group();
+  /* Body */
 
+  const body =
+    new THREE.Mesh(
 
-  // Body
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(4, 1.2, 7),
-    new THREE.MeshStandardMaterial({
-      color: color,
-      metalness: 0.4
-    })
-  );
+      new THREE.BoxGeometry(
+        4,
+        1.25,
+        7
+      ),
 
+      new THREE.MeshStandardMaterial({
+        color:color,
+        metalness:.45,
+        roughness:.35
+      })
+
+    );
 
   body.position.y = 1;
+
+  body.castShadow = true;
+
   group.add(body);
 
 
-  // Cabin
-  const cabin = new THREE.Mesh(
-    new THREE.BoxGeometry(3, 1, 3),
-    new THREE.MeshStandardMaterial({
-      color: 0x111111
-    })
+  /* Cabin */
+
+  const cabin =
+    new THREE.Mesh(
+
+      new THREE.BoxGeometry(
+        3,
+        1,
+        3
+      ),
+
+      new THREE.MeshStandardMaterial({
+        color:0x101820,
+        metalness:.1,
+        roughness:.2
+      })
+
+    );
+
+  cabin.position.set(
+    0,
+    1.85,
+    -0.4
   );
 
+  cabin.castShadow = true;
 
-  cabin.position.y = 1.9;
   group.add(cabin);
 
 
-  // Wheels
-  for (const x of [-2.1, 2.1]) {
-    for (const z of [-2.2, 2.2]) {
+  /* Wheels */
 
+  for(
+    const x of [-2.15,2.15]
+  ){
 
-      const wheel = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.7, 0.7, 0.5, 12),
-        new THREE.MeshStandardMaterial({ color: 0x111111 })
+    for(
+      const z of [-2.2,2.2]
+    ){
+
+      const wheel =
+        new THREE.Mesh(
+
+          new THREE.CylinderGeometry(
+            .72,
+            .72,
+            .5,
+            16
+          ),
+
+          new THREE.MeshStandardMaterial({
+            color:0x111111
+          })
+
+        );
+
+      wheel.rotation.z =
+        Math.PI / 2;
+
+      wheel.position.set(
+        x,
+        .65,
+        z
       );
 
-
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(x, 0.6, z);
-
+      wheel.castShadow = true;
 
       group.add(wheel);
     }
   }
 
 
+  /* Front ram bar */
+
+  const ram =
+    new THREE.Mesh(
+
+      new THREE.BoxGeometry(
+        4.5,
+        .45,
+        .5
+      ),
+
+      new THREE.MeshStandardMaterial({
+        color:0x999999,
+        metalness:.8
+      })
+
+    );
+
+  ram.position.set(
+    0,
+    .7,
+    3.65
+  );
+
+  group.add(ram);
+
+
   scene.add(group);
 
 
   const car = {
-    mesh: group,
-    name: name,
-    health: 100,
-    speed: 0,
-    velocity: new THREE.Vector3(),
-    angle: Math.random() * Math.PI * 2,
-    player: isPlayer,
-    alive: true,
-    cooldown: 0
+
+    mesh:group,
+
+    name:name,
+
+    player:isPlayer,
+
+    health:100,
+
+    alive:true,
+
+    velocity:
+      new THREE.Vector3(),
+
+    angle:
+      Math.random() * Math.PI * 2,
+
+    cooldown:0,
+
+    target:null
+
   };
 
 
   cars.push(car);
 
-
   return car;
 }
 
 
-// ---------------- CREATE CARS ----------------
+/* Player */
 
-
-const player = createCar(0x2196ff, "YOU", true);
-
-
-player.mesh.position.set(0, 0, -60);
-
-
-for (let i = 0; i < 7; i++) {
-
-
-  const angle = (i / 7) * Math.PI * 2;
-
-
-  const car = createCar(
-    [
-      0xff3333,
-      0x33ff66,
-      0xffff33,
-      0xff33ff,
-      0xff8833,
-      0x33ffff,
-      0xffffff
-    ][i],
-    "BOT " + (i + 1)
+const player =
+  createCar(
+    carColors[0],
+    "YOU",
+    true
   );
 
 
-  car.mesh.position.set(
-    Math.cos(angle) * 55,
-    0,
-    Math.sin(angle) * 55
+/* Bots */
+
+for(let i=1;i<8;i++){
+
+  createCar(
+    carColors[i],
+    "BOT " + i
   );
 }
 
 
-// ---------------- CONTROLS ----------------
+/* =========================================================
+   CONTROLS
+========================================================= */
+
+const keys = {
+
+  up:false,
+  down:false,
+  left:false,
+  right:false
+
+};
 
 
-const keys = {};
+window.addEventListener(
+  "keydown",
+  function(event){
+
+    const key =
+      event.key.toLowerCase();
+
+    if(
+      key === "w" ||
+      key === "arrowup"
+    ){
+      keys.up = true;
+    }
+
+    if(
+      key === "s" ||
+      key === "arrowdown"
+    ){
+      keys.down = true;
+    }
+
+    if(
+      key === "a" ||
+      key === "arrowleft"
+    ){
+      keys.left = true;
+    }
+
+    if(
+      key === "d" ||
+      key === "arrowright"
+    ){
+      keys.right = true;
+    }
+
+  }
+);
 
 
-addEventListener("keydown", e => {
-  keys[e.key.toLowerCase()] = true;
+window.addEventListener(
+  "keyup",
+  function(event){
+
+    const key =
+      event.key.toLowerCase();
+
+    if(
+      key === "w" ||
+      key === "arrowup"
+    ){
+      keys.up = false;
+    }
+
+    if(
+      key === "s" ||
+      key === "arrowdown"
+    ){
+      keys.down = false;
+    }
+
+    if(
+      key === "a" ||
+      key === "arrowleft"
+    ){
+      keys.left = false;
+    }
+
+    if(
+      key === "d" ||
+      key === "arrowright"
+    ){
+      keys.right = false;
+    }
+
+  }
+);
+
+
+/* Mobile controls */
+
+document
+.querySelectorAll("[data-control]")
+.forEach(button=>{
+
+  const control =
+    button.dataset.control;
+
+  function set(value){
+
+    if(control==="gas")
+      keys.up=value;
+
+    else if(control==="reverse")
+      keys.down=value;
+
+    else
+      keys[control]=value;
+
+  }
+
+  button.addEventListener(
+    "pointerdown",
+    e=>{
+      e.preventDefault();
+      set(true);
+    }
+  );
+
+  button.addEventListener(
+    "pointerup",
+    e=>{
+      e.preventDefault();
+      set(false);
+    }
+  );
+
+  button.addEventListener(
+    "pointercancel",
+    ()=>{
+      set(false);
+    }
+  );
+
 });
 
 
-addEventListener("keyup", e => {
-  keys[e.key.toLowerCase()] = false;
-});
+/* =========================================================
+   RESET
+========================================================= */
+
+function resetGame(){
+
+  cars.forEach(
+    (car,index)=>{
+
+      car.health = 100;
+
+      car.alive = true;
+
+      car.velocity.set(
+        0,
+        0,
+        0
+      );
+
+      car.cooldown = 0;
+
+      car.mesh.visible = true;
+
+      car.mesh.rotation.set(
+        0,
+        0,
+        0
+      );
 
 
-// ---------------- PHYSICS ----------------
+      if(index===0){
+
+        car.mesh.position.set(
+          0,
+          0,
+          -55
+        );
+
+        car.angle = 0;
+
+      }else{
+
+        const angle =
+          ((index-1)/7) *
+          Math.PI * 2;
+
+        car.mesh.position.set(
+
+          Math.cos(angle)*55,
+
+          0,
+
+          Math.sin(angle)*55
+
+        );
+
+        car.angle =
+          Math.atan2(
+            -car.mesh.position.x,
+            car.mesh.position.z
+          );
+
+      }
+
+      car.mesh.rotation.y =
+        car.angle;
+
+    }
+  );
+
+  kills = 0;
+
+  gameRunning = false;
+
+  updateHUD();
+
+}
 
 
-function drivePlayer(car) {
+/* =========================================================
+   ARENA BOUNDARY
+========================================================= */
+
+function keepInsideArena(car){
+
+  const x =
+    car.mesh.position.x;
+
+  const z =
+    car.mesh.position.z;
+
+  const distance =
+    Math.sqrt(
+      x*x + z*z
+    );
 
 
-  if (!car.alive) return;
+  if(
+    distance >
+    ARENA_RADIUS - 5
+  ){
+
+    const angle =
+      Math.atan2(z,x);
+
+    car.mesh.position.x =
+      Math.cos(angle) *
+      (ARENA_RADIUS-5);
+
+    car.mesh.position.z =
+      Math.sin(angle) *
+      (ARENA_RADIUS-5);
 
 
-  const forward = new THREE.Vector3(
-    Math.sin(car.angle),
-    0,
-    Math.cos(car.angle)
+    car.velocity.multiplyScalar(
+      -0.7
+    );
+
+
+    damage(
+      car,
+      3
+    );
+
+  }
+
+}
+
+
+/* =========================================================
+   PLAYER PHYSICS
+========================================================= */
+
+function updatePlayer(
+  car,
+  delta
+){
+
+  if(!car.alive)
+    return;
+
+
+  const forward =
+    new THREE.Vector3(
+
+      Math.sin(car.angle),
+
+      0,
+
+      Math.cos(car.angle)
+
+    );
+
+
+  if(keys.up){
+
+    car.velocity
+      .addScaledVector(
+        forward,
+        28 * delta
+      );
+
+  }
+
+
+  if(keys.down){
+
+    car.velocity
+      .addScaledVector(
+        forward,
+        -18 * delta
+      );
+
+  }
+
+
+  if(keys.left){
+
+    car.angle +=
+      2.7 *
+      delta *
+      (
+        car.velocity.dot(forward)>=0
+        ? 1
+        : -1
+      );
+
+  }
+
+
+  if(keys.right){
+
+    car.angle -=
+      2.7 *
+      delta *
+      (
+        car.velocity.dot(forward)>=0
+        ? 1
+        : -1
+      );
+
+  }
+
+
+  /* Friction */
+
+  car.velocity.multiplyScalar(
+    Math.pow(
+      .94,
+      delta*60
+    )
   );
 
 
-  if (keys.w || keys.arrowup)
-    car.velocity.addScaledVector(forward, 0.5);
+  /* Speed limit */
+
+  if(
+    car.velocity.length()>28
+  ){
+
+    car.velocity.setLength(28);
+
+  }
 
 
-  if (keys.s || keys.arrowdown)
-    car.velocity.addScaledVector(forward, -0.3);
+  car.mesh.position
+    .addScaledVector(
+      car.velocity,
+      delta
+    );
 
 
-  if (keys.a || keys.arrowleft)
-    car.angle += 0.055;
-
-
-  if (keys.d || keys.arrowright)
-    car.angle -= 0.055;
-
-
-  car.velocity.multiplyScalar(0.96);
-
-
-  if (car.velocity.length() > 1.2)
-    car.velocity.setLength(1.2);
-
-
-  car.mesh.position.add(car.velocity);
-
-
-  car.mesh.rotation.y = car.angle;
+  car.mesh.rotation.y =
+    car.angle;
 
 
   keepInsideArena(car);
+
 }
 
 
-// ---------------- AI ----------------
+/* =========================================================
+   BOT AI
+========================================================= */
+
+function updateBot(
+  car,
+  delta
+){
+
+  if(!car.alive)
+    return;
 
 
-function driveBot(car) {
+  let target =
+    null;
+
+  let closest =
+    Infinity;
 
 
-  if (!car.alive) return;
+  for(
+    const other of cars
+  ){
 
-
-  // Find closest living car
-  let target = player;
-  let best = Infinity;
-
-
-  for (const other of cars) {
-
-
-    if (other === car || !other.alive)
+    if(
+      other === car ||
+      !other.alive
+    )
       continue;
 
 
     const distance =
-      car.mesh.position.distanceTo(other.mesh.position);
+      car.mesh.position
+      .distanceTo(
+        other.mesh.position
+      );
 
 
-    if (distance < best) {
-      best = distance;
-      target = other;
+    if(
+      distance < closest
+    ){
+
+      closest =
+        distance;
+
+      target =
+        other;
+
     }
+
   }
 
 
-  const direction = target.mesh.position
+  if(!target)
+    return;
+
+
+  const direction =
+    target.mesh.position
     .clone()
-    .sub(car.mesh.position);
-
-
-  const wantedAngle =
-    Math.atan2(direction.x, direction.z);
-
-
-  let difference = wantedAngle - car.angle;
-
-
-  while (difference > Math.PI)
-    difference -= Math.PI * 2;
-
-
-  while (difference < -Math.PI)
-    difference += Math.PI * 2;
-
-
-  car.angle += Math.sign(difference) * 0.025;
-
-
-  const forward = new THREE.Vector3(
-    Math.sin(car.angle),
-    0,
-    Math.cos(car.angle)
-  );
-
-
-  car.velocity.addScaledVector(forward, 0.28);
-
-
-  car.velocity.multiplyScalar(0.97);
-
-
-  if (car.velocity.length() > 1)
-    car.velocity.setLength(1);
-
-
-  car.mesh.position.add(car.velocity);
-
-
-  car.mesh.rotation.y = car.angle;
-
-
-  keepInsideArena(car);
-}
-
-
-// ---------------- ARENA COLLISION ----------------
-
-
-function keepInsideArena(car) {
-
-
-  const distance = Math.sqrt(
-    car.mesh.position.x ** 2 +
-    car.mesh.position.z ** 2
-  );
-
-
-  if (distance > arenaSize - 5) {
-
-
-    const angle = Math.atan2(
-      car.mesh.position.z,
-      car.mesh.position.x
+    .sub(
+      car.mesh.position
     );
 
 
-    car.mesh.position.x =
-      Math.cos(angle) * (arenaSize - 5);
+  const wantedAngle =
+    Math.atan2(
+      direction.x,
+      direction.z
+    );
 
 
-    car.mesh.position.z =
-      Math.sin(angle) * (arenaSize - 5);
+  let difference =
+    wantedAngle -
+    car.angle;
 
 
-    // Bounce away from wall
-    car.velocity.multiplyScalar(-0.7);
+  while(
+    difference > Math.PI
+  )
+    difference -=
+      Math.PI*2;
 
 
-    damage(car, 3);
+  while(
+    difference < -Math.PI
+  )
+    difference +=
+      Math.PI*2;
+
+
+  car.angle +=
+    Math.sign(difference) *
+    2.2 *
+    delta;
+
+
+  const forward =
+    new THREE.Vector3(
+
+      Math.sin(car.angle),
+
+      0,
+
+      Math.cos(car.angle)
+
+    );
+
+
+  car.velocity
+    .addScaledVector(
+      forward,
+      17*delta
+    );
+
+
+  car.velocity.multiplyScalar(
+    Math.pow(
+      .965,
+      delta*60
+    )
+  );
+
+
+  if(
+    car.velocity.length()>24
+  ){
+
+    car.velocity.setLength(24);
+
   }
+
+
+  car.mesh.position
+    .addScaledVector(
+      car.velocity,
+      delta
+    );
+
+
+  car.mesh.rotation.y =
+    car.angle;
+
+
+  keepInsideArena(car);
+
 }
 
 
-// ---------------- CAR COLLISIONS ----------------
+/* =========================================================
+   DAMAGE
+========================================================= */
+
+let kills = 0;
 
 
-function collisions() {
+function damage(
+  car,
+  amount
+){
 
-
-  for (let i = 0; i < cars.length; i++) {
-
-
-    const a = cars[i];
-
-
-    if (!a.alive) continue;
-
-
-    for (let j = i + 1; j < cars.length; j++) {
-
-
-      const b = cars[j];
-
-
-      if (!b.alive) continue;
-
-
-      const distance =
-        a.mesh.position.distanceTo(b.mesh.position);
-
-
-      if (distance < 5) {
-
-
-        const impact =
-          a.velocity.length() +
-          b.velocity.length();
-
-
-        // Push cars apart
-        const direction =
-          a.mesh.position
-            .clone()
-            .sub(b.mesh.position)
-            .normalize();
-
-
-        a.velocity.addScaledVector(direction, 0.5);
-        b.velocity.addScaledVector(direction, -0.5);
-
-
-        // Damage
-        if (impact > 0.4) {
-
-
-          damage(a, impact * 4);
-          damage(b, impact * 4);
-
-
-          // Small collision spin
-          a.angle += (Math.random() - 0.5) * 0.3;
-          b.angle += (Math.random() - 0.5) * 0.3;
-        }
-      }
-    }
-  }
-}
-
-
-// ---------------- DAMAGE ----------------
-
-
-function damage(car, amount) {
-
-
-  if (!car.alive || car.cooldown > 0)
+  if(
+    !car.alive ||
+    car.cooldown > 0
+  )
     return;
 
 
   car.health -= amount;
-  car.cooldown = 0.1;
+
+  car.cooldown = .12;
 
 
-  if (car.health <= 0) {
-
+  if(
+    car.health <= 0
+  ){
 
     car.health = 0;
+
     car.alive = false;
 
 
-    // Destroy/disable car
+    /* Disable car */
+
+    car.velocity
+      .multiplyScalar(.2);
+
+
     car.mesh.rotation.z =
-      (Math.random() - 0.5) * 1.5;
+      (
+        Math.random()-.5
+      ) * 1.3;
 
 
-    car.mesh.position.y = 0.5;
+    if(
+      car.player
+    ){
 
+      endGame(false);
 
-    console.log(car.name + " ELIMINATED!");
+    }else{
+
+      setTimeout(
+        ()=>{
+          car.mesh.visible=false;
+        },
+        500
+      );
+
+    }
+
   }
+
 }
 
 
-// ---------------- HUD ----------------
+/* =========================================================
+   COLLISION PHYSICS
+========================================================= */
+
+function collisionPhysics(){
+
+  for(
+    let i=0;
+    i<cars.length;
+    i++
+  ){
+
+    for(
+      let j=i+1;
+      j<cars.length;
+      j++
+    ){
+
+      const a =
+        cars[i];
+
+      const b =
+        cars[j];
 
 
-const hud = document.createElement("div");
+      if(
+        !a.alive ||
+        !b.alive
+      )
+        continue;
 
 
-hud.style.cssText = `
-position:fixed;
-top:20px;
-left:20px;
-color:white;
-font-family:monospace;
-font-size:18px;
-background:rgba(0,0,0,.7);
-padding:15px;
-z-index:10;
-`;
+      const difference =
+        b.mesh.position
+        .clone()
+        .sub(
+          a.mesh.position
+        );
 
 
-document.body.appendChild(hud);
+      difference.y = 0;
 
 
-function updateHUD() {
+      const distance =
+        difference.length();
 
 
-  const alive = cars.filter(c => c.alive);
+      if(
+        distance >= 5 ||
+        distance < .01
+      )
+        continue;
 
 
-  hud.innerHTML = `
-    <b>DEMOLITION DERBY</b><br><br>
-    YOUR HP: ${Math.ceil(player.health)}<br>
-    CARS LEFT: ${alive.length}<br><br>
-    WASD / ARROWS = DRIVE
-  `;
+      const normal =
+        difference.normalize();
 
 
-  if (!player.alive) {
+      const relativeVelocity =
+        b.velocity
+        .clone()
+        .sub(
+          a.velocity
+        );
 
 
-    hud.innerHTML += `
-      <br><b style="color:red">
-      YOU WERE ELIMINATED!
-      </b>
-    `;
+      const impact =
+        Math.max(
+          0,
+          -relativeVelocity.dot(
+            normal
+          )
+        );
 
 
-  } else if (alive.length === 1) {
+      /* Push cars apart */
+
+      a.velocity
+        .addScaledVector(
+          normal,
+          -impact*.8
+        );
 
 
-    hud.innerHTML += `
-      <br><b style="color:#00ff66">
-      🏆 YOU WIN!
-      </b>
-    `;
+      b.velocity
+        .addScaledVector(
+          normal,
+          impact*.8
+        );
+
+
+      const overlap =
+        5-distance;
+
+
+      a.mesh.position
+        .addScaledVector(
+          normal,
+          -overlap/2
+        );
+
+
+      b.mesh.position
+        .addScaledVector(
+          normal,
+          overlap/2
+        );
+
+
+      /* Damage */
+
+      if(
+        impact > .5
+      ){
+
+        const damageAmount =
+          Math.min(
+            30,
+            impact*5
+          );
+
+
+        const aWasAlive =
+          a.alive;
+
+        const bWasAlive =
+          b.alive;
+
+
+        damage(
+          a,
+          damageAmount
+        );
+
+
+        damage(
+          b,
+          damageAmount
+        );
+
+
+        if(
+          aWasAlive &&
+          !a.alive &&
+          b.player
+        ){
+
+          kills++;
+
+        }
+
+
+        if(
+          bWasAlive &&
+          !b.alive &&
+          a.player
+        ){
+
+          kills++;
+
+        }
+
+      }
+
+    }
+
   }
+
 }
 
 
-// ---------------- CAMERA ----------------
+/* =========================================================
+   HUD
+========================================================= */
+
+function updateHUD(){
+
+  document.getElementById(
+    "hp"
+  ).textContent =
+    Math.ceil(
+      player.health
+    );
 
 
-function updateCamera() {
+  document.getElementById(
+    "carsLeft"
+  ).textContent =
+    cars.filter(
+      car=>car.alive
+    ).length;
 
 
-  const target = player.mesh.position.clone();
+  document.getElementById(
+    "kills"
+  ).textContent =
+    kills;
 
 
-  const behind = new THREE.Vector3(
-    -Math.sin(player.angle) * 18,
-    12,
-    -Math.cos(player.angle) * 18
-  );
+  document.getElementById(
+    "speed"
+  ).textContent =
+    Math.round(
+      player.velocity.length()*4
+    );
+
+
+  document.getElementById(
+    "healthBar"
+  ).style.width =
+    player.health + "%";
+
+}
+
+
+/* =========================================================
+   CAMERA
+========================================================= */
+
+function updateCamera(
+  delta
+){
+
+  const forward =
+    new THREE.Vector3(
+
+      Math.sin(
+        player.angle
+      ),
+
+      0,
+
+      Math.cos(
+        player.angle
+      )
+
+    );
+
+
+  const desired =
+    player.mesh.position
+    .clone()
+    .addScaledVector(
+      forward,
+      -18
+    )
+    .add(
+      new THREE.Vector3(
+        0,
+        10,
+        0
+      )
+    );
 
 
   camera.position.lerp(
-    target.clone().add(behind),
-    0.08
+    desired,
+    1 -
+    Math.pow(
+      .001,
+      delta
+    )
   );
 
 
   camera.lookAt(
-    target.clone().add(new THREE.Vector3(0, 1, 0))
+    player.mesh.position
+    .clone()
+    .add(
+      new THREE.Vector3(
+        0,
+        1,
+        0
+      )
+    )
   );
+
 }
 
 
-// ---------------- GAME LOOP ----------------
+/* =========================================================
+   GAME STATE
+========================================================= */
+
+let gameRunning =
+  false;
 
 
-function gameLoop() {
+function startGame(){
+
+  resetGame();
+
+  gameRunning =
+    true;
+
+  document.getElementById(
+    "menu"
+  ).style.display =
+    "none";
+
+  document.getElementById(
+    "result"
+  ).style.display =
+    "none";
+
+}
 
 
-  requestAnimationFrame(gameLoop);
+function endGame(
+  playerWon
+){
+
+  if(!gameRunning)
+    return;
 
 
-  for (const car of cars) {
+  gameRunning =
+    false;
 
 
-    car.cooldown -= 0.016;
+  const result =
+    document.getElementById(
+      "result"
+    );
 
 
-    if (car.player)
-      drivePlayer(car);
-    else
-      driveBot(car);
+  const title =
+    document.getElementById(
+      "resultTitle"
+    );
+
+
+  const text =
+    document.getElementById(
+      "resultText"
+    );
+
+
+  if(playerWon){
+
+    title.textContent =
+      "🏆 YOU WIN!";
+
+    text.textContent =
+      "You are the last car standing! " +
+      "Kills: " + kills;
+
+  }else{
+
+    title.textContent =
+      "💥 ELIMINATED!";
+
+    text.textContent =
+      "Your car was destroyed. " +
+      "Kills: " + kills;
+
   }
 
 
-  collisions();
+  result.style.display =
+    "flex";
 
-
-  updateCamera();
-  updateHUD();
-
-
-  renderer.render(scene, camera);
 }
 
 
-gameLoop();
+/* =========================================================
+   BUTTONS
+========================================================= */
+
+document.getElementById(
+  "startButton"
+).onclick =
+  startGame;
 
 
-// ---------------- RESIZE ----------------
+document.getElementById(
+  "restartButton"
+).onclick =
+  startGame;
 
 
-addEventListener("resize", () => {
+/* =========================================================
+   MAIN LOOP
+========================================================= */
+
+let previousTime =
+  performance.now();
 
 
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
+function gameLoop(
+  currentTime
+){
 
-
-  renderer.setSize(
-    innerWidth,
-    innerHeight
+  requestAnimationFrame(
+    gameLoop
   );
-});
+
+
+  const delta =
+    Math.min(
+      .04,
+      (currentTime -
+       previousTime) /
+      1000
+    );
+
+
+  previousTime =
+    currentTime;
+
+
+  if(gameRunning){
+
+    for(
+      const car of cars
+    ){
+
+      car.cooldown =
+        Math.max(
+          0,
+          car.cooldown -
+          delta
+        );
+
+
+      if(car.player){
+
+        updatePlayer(
+          car,
+          delta
+        );
+
+      }else{
+
+        updateBot(
+          car,
+          delta
+        );
+
+      }
+
+    }
+
+
+    collisionPhysics();
+
+
+    const aliveCars =
+      cars.filter(
+        car=>car.alive
+      );
+
+
+    if(
+      aliveCars.length === 1 &&
+      aliveCars[0] === player
+    ){
+
+      endGame(true);
+
+    }
+
+
+    updateHUD();
+
+  }
+
+
+  updateCamera(
+    delta
+  );
+
+
+  renderer.render(
+    scene,
+    camera
+  );
+
+}
+
+
+resetGame();
+
+gameLoop(
+  performance.now()
+);
+
+
+/* =========================================================
+   WINDOW RESIZE
+========================================================= */
+
+window.addEventListener(
+  "resize",
+  ()=>{
+
+    camera.aspect =
+      window.innerWidth /
+      window.innerHeight;
+
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(
+      window.innerWidth,
+      window.innerHeight
+    );
+
+  }
+);
+
+</script>
+
+</body>
+</html>
